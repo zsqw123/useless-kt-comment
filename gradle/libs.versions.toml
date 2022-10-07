@@ -1,0 +1,18 @@
+[versions]
+kotlin = "1.7.20"
+#checkstyle = "8.37"
+
+[libraries]
+similarity = { module = "info.debatty:java-string-similarity", version = "2.0.0" }
+compilerEmbeddable = { module = "org.jetbrains.kotlin:kotlin-compiler-embeddable", version.ref = "kotlin" }
+coroutine = "org.jetbrains.kotlinx:kotlinx-coroutines-core:1.6.4"
+#groovy-json = { module = "org.codehaus.groovy:groovy-json", version.ref = "groovy" }
+#commons-lang3 = { group = "org.apache.commons", name = "commons-lang3", version = { strictly = "[3.8, 4.0[", prefer="3.9" } }
+
+[bundles]
+#groovy = ["groovy-core", "groovy-json", "groovy-nio"]
+
+[plugins]
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+shadow = "com.github.johnrengelman.shadow:7.1.2"
+#jmh = { id = "me.champeau.jmh", version = "0.6.5" }
