@@ -22,6 +22,7 @@ import org.jetbrains.kotlin.com.intellij.psi.PsiComment
 import org.jetbrains.kotlin.com.intellij.psi.PsiElement
 import org.jetbrains.kotlin.com.intellij.psi.PsiManager
 import org.jetbrains.kotlin.config.CompilerConfiguration
+import org.jetbrains.kotlin.psi.KtClassOrObject
 import org.jetbrains.kotlin.psi.KtFile
 import org.jetbrains.kotlin.psi.KtNamedDeclaration
 import org.jetbrains.kotlin.psi.KtTreeVisitorVoid
@@ -112,7 +113,7 @@ private class UselessCodeVisitor(gitDir: File?, private val rate: Double) : KtTr
         if (useLessRate > rate) {
             val fileFqn = input.containingKtFile.packageFqName
             val lineNumber = element.lineNumber
-            val containing = input.containingClassOrObject?.name ?: ""
+            val containing = (if (input !is KtClassOrObject) input.containingClassOrObject else input)?.name ?: ""
             val containingExtra = if (containing.isEmpty()) "" else ".$containing"
             val gitExtra = if (git != null) {
                 val file = input.containingKtFile.virtualFile?.ioFile
