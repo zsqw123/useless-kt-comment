@@ -48,7 +48,12 @@ test.Bad#2: 1.0
   author: zsu<i@mail.com>
 ```
 
+It will output the probability that the comment is useless, with a value from `0 to 1`, closer to 1 means that
+the comment is more likely to be useless / 
+它会输出可能是无用注释的可能性，取值为 0~1，越接近1代表注释越有可能是无用的
+
 ### Parameters
+
 - `-file` (Required)
   - followed at the end by the file/folder you want to scan.
   - 后面加想要扫描的文件，可以是一个文件，也可以是个文件夹
