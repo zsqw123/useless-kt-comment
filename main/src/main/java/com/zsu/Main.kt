@@ -31,6 +31,7 @@ import org.jetbrains.kotlin.psi.psiUtil.containingClassOrObject
 import org.jetbrains.kotlin.psi.psiUtil.startOffset
 import org.jetbrains.kotlin.util.capitalizeDecapitalize.decapitalizeSmart
 import java.io.File
+import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
@@ -44,7 +45,31 @@ public fun main(args: Array<String>) {
         "-rate" -> rate = args[i + 1].toDoubleOrNull() ?: rate
     }
     if (file == null) throw Exception("No file input.")
-    analyze(file, UselessCodeVisitor(git, rate))
+    val visitor = UselessCodeVisitor(git, rate)
+    analyze(file, visitor)
+    val result = visitor.result
+    result.forEach {
+        it.apply {
+            println(
+                "${fileFqn}$containingExtra#$lineNumber: $uselessRate\n" +
+                        "  comment: $commentText\n" +
+                        "  declaration: $inputName\n" +
+                        gitExtra
+            )
+        }
+    }
+    val authorCount = hashMapOf<String, Int>()
+    for (data in result) {
+        val gitUser = data.gitExtra.trim().substringAfter(' ')
+        val currentCount = authorCount[gitUser] ?: 0
+        authorCount[gitUser] = currentCount + 1
+    }
+    val sorted = authorCount.toSortedMap { o1, o2 -> (authorCount[o2] ?: 0) - (authorCount[o1] ?: 0) }
+    if (sorted.isNotEmpty()) {
+        val str = sorted.map { "${it.key}: ${it.value}" }
+            .joinToString("\n", prefix = "top useless comment user:\n")
+        println(str)
+    }
 }
 
 private fun File.toKtFile(project: MockProject): KtFile? {
@@ -97,11 +122,23 @@ private class UselessCodeVisitor(gitDir: File?, private val rate: Double) : KtTr
         return isBlank()
     }
 
+    val result: MutableList<Data> = Collections.synchronizedList(arrayListOf())
+
     private val VirtualFile.ioFile: File
         get() = VfsUtilCore.virtualToIoFile(this)
 
-    private fun scanComment(input: KtNamedDeclaration, element: PsiComment) {
-        val inputName = input.name ?: return
+    class Data(
+        val fileFqn: String,
+        val lineNumber: Int,
+        val containingExtra: String,
+        val gitExtra: String,
+        val inputName: String,
+        val commentText: String,
+        val uselessRate: Double,
+    )
+
+    private fun scanComment(input: KtNamedDeclaration, element: PsiComment): List<Data> {
+        val inputName = input.name ?: return result
         val realText = element.text.lines().joinToString(" ") {
             it.trim().removePrefix("//")
                 .removePrefix("/**")
@@ -111,7 +148,7 @@ private class UselessCodeVisitor(gitDir: File?, private val rate: Double) : KtTr
         }.trim()
         val useLessRate = if (realText.isMeaningless()) 1.0 else SameRate.calculate(inputName, realText)
         if (useLessRate > rate) {
-            val fileFqn = input.containingKtFile.packageFqName
+            val fileFqn = input.containingKtFile.packageFqName.asString()
             val lineNumber = element.lineNumber
             val containing = (if (input !is KtClassOrObject) input.containingClassOrObject else input)?.name ?: ""
             val containingExtra = if (containing.isEmpty()) "" else ".$containing"
@@ -131,13 +168,13 @@ private class UselessCodeVisitor(gitDir: File?, private val rate: Double) : KtTr
                     ""
                 }
             } else ""
-            println(
-                "${fileFqn.asString()}$containingExtra#$lineNumber: $useLessRate\n" +
-                        "  comment: ${element.text.replace('\n', ' ')}\n" +
-                        "  declaration: $inputName\n" +
-                        gitExtra
+            result += Data(
+                fileFqn, lineNumber, containingExtra, gitExtra,
+                inputName, element.text.replace('\n', ' '), useLessRate
             )
+
         }
+        return result
     }
 
     override fun visitNamedDeclaration(declaration: KtNamedDeclaration) {
@@ -179,6 +216,7 @@ private object SameRate {
             longN = long.normalize()
         }
         if (shortN.length > longN.length) return calculate(longN, shortN)
+        if (shortN.length < 3) return 0.0
         // only calculate ascii
         if (shortN.asciiRate < 0.6 || long.asciiRate < 0.6) return 0.0
         val distanceLevenshtein = NormalizedLevenshtein().distance(shortN, longN)
