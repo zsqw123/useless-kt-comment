@@ -31,7 +31,7 @@ import org.jetbrains.kotlin.psi.psiUtil.containingClassOrObject
 import org.jetbrains.kotlin.psi.psiUtil.startOffset
 import org.jetbrains.kotlin.util.capitalizeDecapitalize.decapitalizeSmart
 import java.io.File
-import java.util.*
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 public fun main(args: Array<String>) {
@@ -92,7 +92,7 @@ private fun analyze(file: File, processor: KtVisitorVoid) {
 
 private class UselessCodeVisitor(gitDir: File?, private val rate: Double) : KtTreeVisitorVoid() {
     private val git = gitDir?.let { Git(it) }
-    private val blameMap = WeakHashMap<String, List<String>>()
+    private val blameMap = ConcurrentHashMap<String, List<String>>()
     private fun String.isMeaningless(): Boolean {
         return isBlank()
     }
