@@ -67,7 +67,7 @@ public fun main(args: Array<String>) {
         currentRate.allCount++
         authorCount[gitUser] = currentRate
     }
-    val authors = authorCount.toList()
+    val authors = authorCount.toList().filter { it.second.uselessCount > 0 }
     if (authors.isNotEmpty()) {
         val allAuthorsByRate = authors.sortedByDescending {
             it.second.rate
