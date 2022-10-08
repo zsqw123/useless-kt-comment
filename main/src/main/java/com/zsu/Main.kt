@@ -34,6 +34,7 @@ import java.io.File
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 public fun main(args: Array<String>) {
     var file: File? = null
@@ -45,11 +46,11 @@ public fun main(args: Array<String>) {
         "-rate" -> rate = args[i + 1].toDoubleOrNull() ?: rate
     }
     if (file == null) throw Exception("No file input.")
-    val visitor = UselessCodeVisitor(git, rate)
+    val visitor = UselessCodeVisitor(git)
     analyze(file, visitor)
     val result = visitor.result
     result.forEach {
-        it.apply {
+        if (it.uselessRate > rate) it.apply {
             println(
                 "${fileFqn}$containingExtra#$lineNumber: $uselessRate\n" +
                         "  comment: $commentText\n" +
@@ -58,18 +59,41 @@ public fun main(args: Array<String>) {
             )
         }
     }
-    val authorCount = hashMapOf<String, Int>()
+    val authorCount = hashMapOf<String, Rate>()
     for (data in result) {
         val gitUser = data.gitExtra.trim().substringAfter(' ')
-        val currentCount = authorCount[gitUser] ?: 0
-        authorCount[gitUser] = currentCount + 1
+        val currentRate = authorCount[gitUser] ?: Rate(0, 0)
+        if (data.uselessRate > rate) currentRate.uselessCount++
+        currentRate.allCount++
+        authorCount[gitUser] = currentRate
     }
-    val sorted = authorCount.toSortedMap { o1, o2 -> (authorCount[o2] ?: 0) - (authorCount[o1] ?: 0) }
-    if (sorted.isNotEmpty()) {
-        val str = sorted.map { "${it.key}: ${it.value}" }
-            .joinToString("\n", prefix = "top useless comment user:\n")
-        println(str)
+    val authors = authorCount.toList()
+    if (authors.isNotEmpty()) {
+        val allAuthorsByRate = authors.sortedByDescending {
+            it.second.rate
+        }
+        val allAuthorsByRateStr = allAuthorsByRate.joinToString(
+            "\n", prefix = "top useless comment rate: (uselessCount / allCount = uselessRate)\n"
+        ) { "${it.first}: ${it.second}" }
+        println(allAuthorsByRateStr)
+        println()
+        val allAuthorsByCount = authors.sortedByDescending {
+            it.second.uselessCount
+        }
+        val allAuthorsByCountStr = allAuthorsByCount.joinToString(
+            "\n", prefix = "top useless comment count:\n"
+        ) { "${it.first}: ${it.second.uselessCount}" }
+        println(allAuthorsByCountStr)
     }
+
+}
+
+private class Rate(
+    var uselessCount: Int,
+    var allCount: Int,
+) {
+    val rate: Double get() = uselessCount.toDouble() / allCount
+    override fun toString(): String = "$uselessCount / $allCount = ${uselessCount.toDouble() / allCount}"
 }
 
 private fun File.toKtFile(project: MockProject): KtFile? {
@@ -106,16 +130,23 @@ private fun analyze(file: File, processor: KtVisitorVoid) {
     } else file.addToFiles()
     println("count: ${kotlinFiles.size}, start analyze files")
     val start = System.currentTimeMillis()
-    kotlinFiles.chunked(100).blockingAsync { singleChunk ->
+    val chunks = kotlinFiles.chunked(100)
+    val total = chunks.size
+    val current = AtomicInteger()
+    chunks.blockingAsync { singleChunk ->
         val project = createIdeaProject()
         for (kotlinFile in singleChunk) {
             kotlinFile.toKtFile(project)?.accept(processor)
+        }
+        val now = current.incrementAndGet()
+        if (now % 10 == 0 || now == total) {
+            println("current: $now/$total")
         }
     }
     println("end analyze files, cost: ${(System.currentTimeMillis() - start) / 1000}s")
 }
 
-private class UselessCodeVisitor(gitDir: File?, private val rate: Double) : KtTreeVisitorVoid() {
+private class UselessCodeVisitor(gitDir: File?) : KtTreeVisitorVoid() {
     private val git = gitDir?.let { Git(it) }
     private val blameMap = ConcurrentHashMap<String, List<String>>()
     private fun String.isMeaningless(): Boolean {
@@ -137,8 +168,8 @@ private class UselessCodeVisitor(gitDir: File?, private val rate: Double) : KtTr
         val uselessRate: Double,
     )
 
-    private fun scanComment(input: KtNamedDeclaration, element: PsiComment): List<Data> {
-        val inputName = input.name ?: return result
+    private fun scanComment(input: KtNamedDeclaration, element: PsiComment) {
+        val inputName = input.name ?: return
         val realText = element.text.lines().joinToString(" ") {
             it.trim().removePrefix("//")
                 .removePrefix("/**")
@@ -147,34 +178,30 @@ private class UselessCodeVisitor(gitDir: File?, private val rate: Double) : KtTr
                 .removePrefix("*").trim()
         }.trim()
         val useLessRate = if (realText.isMeaningless()) 1.0 else SameRate.calculate(inputName, realText)
-        if (useLessRate > rate) {
-            val fileFqn = input.containingKtFile.packageFqName.asString()
-            val lineNumber = element.lineNumber
-            val containing = (if (input !is KtClassOrObject) input.containingClassOrObject else input)?.name ?: ""
-            val containingExtra = if (containing.isEmpty()) "" else ".$containing"
-            val gitExtra = if (git != null) {
-                val file = input.containingKtFile.virtualFile?.ioFile
-                if (file == null) "" else run {
-                    val path = file.absolutePath
-                    val blameCache = blameMap[path] ?: runCatching {
-                        git?.callBlame(file)
-                    }.getOrNull()
-                    if (blameCache != null) {
-                        blameMap[path] = blameCache
-                        if (lineNumber >= 0) {
-                            return@run "  author: ${blameCache[lineNumber]}\n"
-                        }
+        val fileFqn = input.containingKtFile.packageFqName.asString()
+        val lineNumber = element.lineNumber
+        val containing = (if (input !is KtClassOrObject) input.containingClassOrObject else input)?.name ?: ""
+        val containingExtra = if (containing.isEmpty()) "" else ".$containing"
+        val gitExtra = if (git != null) {
+            val file = input.containingKtFile.virtualFile?.ioFile
+            if (file == null) "" else run {
+                val path = file.absolutePath
+                val blameCache = blameMap[path] ?: runCatching {
+                    git?.callBlame(file)
+                }.getOrNull()
+                if (blameCache != null) {
+                    blameMap[path] = blameCache
+                    if (lineNumber >= 0) {
+                        return@run "  author: ${blameCache[lineNumber]}\n"
                     }
-                    ""
                 }
-            } else ""
-            result += Data(
-                fileFqn, lineNumber, containingExtra, gitExtra,
-                inputName, element.text.replace('\n', ' '), useLessRate
-            )
-
-        }
-        return result
+                ""
+            }
+        } else ""
+        result += Data(
+            fileFqn, lineNumber, containingExtra, gitExtra,
+            inputName, element.text.replace('\n', ' '), useLessRate
+        )
     }
 
     override fun visitNamedDeclaration(declaration: KtNamedDeclaration) {
