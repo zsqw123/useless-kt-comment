@@ -62,6 +62,7 @@ public fun main(args: Array<String>) {
     val authorCount = hashMapOf<String, Rate>()
     for (data in result) {
         val gitUser = data.gitExtra.trim().substringAfter(' ')
+        if (gitUser.isEmpty()) continue
         val currentRate = authorCount[gitUser] ?: Rate(0, 0)
         if (data.uselessRate > rate) currentRate.uselessCount++
         currentRate.allCount++
